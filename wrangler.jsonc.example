@@ -43,7 +43,7 @@
 		{
 			"binding": "DB",
 			"database_name": "rag-database",
-			"database_id": "289d00ed-9d90-466f-999d-20f07abc20f8"
+			"database_id": "<DATABASE_ID>"
 		}
 	],
 	"vectorize": [

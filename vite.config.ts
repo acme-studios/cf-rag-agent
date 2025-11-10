@@ -8,7 +8,10 @@ export default defineConfig({
   plugins: [cloudflare(), react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src")
+      "@": path.resolve(__dirname, "./src"),
+      // Alias server-only modules to empty modules for client
+      'pdf-parse': path.resolve(__dirname, './src/utils/empty.ts'),
+      'mammoth': path.resolve(__dirname, './src/utils/empty.ts')
     }
   }
 });

@@ -1,56 +1,53 @@
-# 🤖 Chat Agent Starter Kit
+# Agentic RAG Application
 
-![npm i agents command](./npm-agents-banner.svg)
-
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/agents-starter"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"/></a>
-
-A starter template for building AI-powered chat agents using Cloudflare's Agent platform, powered by [`agents`](https://www.npmjs.com/package/agents). This project provides a foundation for creating interactive chat experiences with AI, complete with a modern UI and tool integration capabilities.
+A production-ready **Retrieval Augmented Generation (RAG)** application built on Cloudflare's infrastructure. Upload documents, ask questions, and get accurate answers with source citations.
 
 ## Features
 
-- 💬 Interactive chat interface with AI
-- 🛠️ Built-in tool system with human-in-the-loop confirmation
-- 📅 Advanced task scheduling (one-time, delayed, and recurring via cron)
-- 🌓 Dark/Light theme support
-- ⚡️ Real-time streaming responses
-- 🔄 State management and chat history
-- 🎨 Modern, responsive UI
+- 📄 **Document Management** - Upload PDF/DOCX files with drag-and-drop
+- 🔍 **Semantic Search** - Vector-based search using Cloudflare Vectorize
+- 💬 **Intelligent Chat** - AI-powered responses with source citations
+- 🔄 **Durable Processing** - Reliable document processing with automatic retries
+- 📊 **Real-time Progress** - Live updates during document processing
+- 🎨 **Modern UI** - Clean slate/charcoal design with dark mode
+- 🔐 **Session Isolation** - Each user's data is completely isolated
 
-## Prerequisites
+## Tech Stack
 
-- Cloudflare account
-- OpenAI API key
+- **AI Model**: Llama 4 Scout (17B, 16 experts) via Workers AI
+- **Function Calling**: Native tool use for RAG operations
+- **Storage**: R2 (files), D1 (metadata), Vectorize (embeddings)
+- **Workflows**: Durable execution for document processing
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Backend**: Cloudflare Workers + Durable Objects
 
 ## Quick Start
 
-1. Create a new project:
-
-```bash
-npx create-cloudflare@latest --template cloudflare/agents-starter
-```
-
-2. Install dependencies:
-
+1. **Install dependencies:**
 ```bash
 npm install
 ```
 
-3. Set up your environment:
+2. **Configure Cloudflare resources:**
+```bash
+# Create D1 database
+wrangler d1 create rag-database
 
-Create a `.dev.vars` file:
+# Create Vectorize index
+wrangler vectorize create rag-vector-index --dimensions=768 --metric=cosine
 
-```env
-OPENAI_API_KEY=your_openai_api_key
+# Create R2 bucket
+wrangler r2 bucket create rag-documents
 ```
 
-4. Run locally:
+3. **Update `wrangler.jsonc`** with your resource IDs
 
+4. **Run locally:**
 ```bash
 npm start
 ```
 
-5. Deploy:
-
+5. **Deploy:**
 ```bash
 npm run deploy
 ```
@@ -58,180 +55,126 @@ npm run deploy
 ## Project Structure
 
 ```
-├── src/
-│   ├── app.tsx        # Chat UI implementation
-│   ├── server.ts      # Chat agent logic
-│   ├── tools.ts       # Tool definitions
-│   ├── utils.ts       # Helper functions
-│   └── styles.css     # UI styling
+src/
+├── agent/
+│   └── RAGAgent.ts              # Core agent with session management
+├── api/
+│   └── uploadDocument.ts        # Document upload & status endpoints
+├── components/
+│   ├── ui/                      # Reusable UI components (Button, Badge, etc.)
+│   ├── layout/                  # Layout components (Navbar, TwoColumnLayout)
+│   ├── docs/                    # Document management components
+│   └── chat/                    # Chat interface components
+├── services/
+│   ├── textExtractor.ts         # PDF/DOCX text extraction
+│   ├── textChunker.ts           # Text chunking with overlap
+│   ├── embeddings.ts            # Embedding generation
+│   └── storage.ts               # D1 & Vectorize operations
+├── tools/
+│   └── ragTools.ts              # RAG tools (search, list, delete)
+├── workflows/
+│   └── DocumentProcessing.ts   # Durable document processing workflow
+├── app.tsx                      # Main application
+└── server.ts                    # Worker entry point
 ```
 
-## Customization Guide
+## Architecture
 
-### Adding New Tools
+### Document Processing Flow
+1. **Upload** → File sent to `/api/upload`, stored in R2
+2. **Extract** → Text extracted from PDF/DOCX
+3. **Chunk** → Text split into 1000-char chunks with 200-char overlap
+4. **Embed** → Each chunk converted to 768-dim vector (BGE model)
+5. **Store** → Chunks saved to D1, vectors to Vectorize
 
-Add new tools in `tools.ts` using the tool builder:
+### RAG Query Flow
+1. **User asks question** → Sent to chat agent
+2. **Llama 4 Scout decides** → Uses `search_documents` tool
+3. **Generate query embedding** → Convert question to vector
+4. **Search Vectorize** → Find top-K similar chunks
+5. **Retrieve context** → Get full text from D1
+6. **Generate answer** → LLM responds with citations
 
-```ts
-// Example of a tool that requires confirmation
-const searchDatabase = tool({
-  description: "Search the database for user records",
-  parameters: z.object({
-    query: z.string(),
-    limit: z.number().optional()
-  })
-  // No execute function = requires confirmation
-});
+### RAG Tools
 
-// Example of an auto-executing tool
-const getCurrentTime = tool({
-  description: "Get current server time",
-  parameters: z.object({}),
-  execute: async () => new Date().toISOString()
-});
+Three tools available to the AI agent:
 
-// Scheduling tool implementation
-const scheduleTask = tool({
-  description:
-    "schedule a task to be executed at a later time. 'when' can be a date, a delay in seconds, or a cron pattern.",
-  parameters: z.object({
-    type: z.enum(["scheduled", "delayed", "cron"]),
-    when: z.union([z.number(), z.string()]),
-    payload: z.string()
-  }),
-  execute: async ({ type, when, payload }) => {
-    // ... see the implementation in tools.ts
-  }
-});
-```
-
-To handle tool confirmations, add execution functions to the `executions` object:
-
+**1. `search_documents`** - Semantic search with citations
 ```typescript
-export const executions = {
-  searchDatabase: async ({
-    query,
-    limit
-  }: {
-    query: string;
-    limit?: number;
-  }) => {
-    // Implementation for when the tool is confirmed
-    const results = await db.search(query, limit);
-    return results;
-  }
-  // Add more execution handlers for other tools that require confirmation
-};
+// Automatically called when user asks questions about documents
+// Returns relevant chunks with filename and page number
 ```
 
-Tools can be configured in two ways:
-
-1. With an `execute` function for automatic execution
-2. Without an `execute` function, requiring confirmation and using the `executions` object to handle the confirmed action. NOTE: The keys in `executions` should match `toolsRequiringConfirmation` in `app.tsx`.
-
-### Use a different AI model provider
-
-The starting [`server.ts`](https://github.com/cloudflare/agents-starter/blob/main/src/server.ts) implementation uses the [`ai-sdk`](https://sdk.vercel.ai/docs/introduction) and the [OpenAI provider](https://sdk.vercel.ai/providers/ai-sdk-providers/openai), but you can use any AI model provider by:
-
-1. Installing an alternative AI provider for the `ai-sdk`, such as the [`workers-ai-provider`](https://sdk.vercel.ai/providers/community-providers/cloudflare-workers-ai) or [`anthropic`](https://sdk.vercel.ai/providers/ai-sdk-providers/anthropic) provider:
-2. Replacing the AI SDK with the [OpenAI SDK](https://github.com/openai/openai-node)
-3. Using the Cloudflare [Workers AI + AI Gateway](https://developers.cloudflare.com/ai-gateway/providers/workersai/#workers-binding) binding API directly
-
-For example, to use the [`workers-ai-provider`](https://sdk.vercel.ai/providers/community-providers/cloudflare-workers-ai), install the package:
-
-```sh
-npm install workers-ai-provider
+**2. `list_documents`** - List all uploaded documents
+```typescript
+// Shows document names, status, upload dates, chunk counts
 ```
 
-Add an `ai` binding to `wrangler.jsonc`:
-
-```jsonc
-// rest of file
-  "ai": {
-    "binding": "AI"
-  }
-// rest of file
+**3. `delete_document`** - Remove documents
+```typescript
+// Deletes from R2, D1, and Vectorize
+// Requires explicit user confirmation
 ```
 
-Replace the `@ai-sdk/openai` import and usage with the `workers-ai-provider`:
+## Testing
 
-```diff
-// server.ts
-// Change the imports
-- import { openai } from "@ai-sdk/openai";
-+ import { createWorkersAI } from 'workers-ai-provider';
+The project uses **Vitest** with Cloudflare Workers support for testing:
 
-// Create a Workers AI instance
-+ const workersai = createWorkersAI({ binding: env.AI });
+```bash
+# Run tests
+npm test
 
-// Use it when calling the streamText method (or other methods)
-// from the ai-sdk
-- const model = openai("gpt-4o-2024-11-20");
-+ const model = workersai("@cf/deepseek-ai/deepseek-r1-distill-qwen-32b")
+# Run tests in watch mode
+npm test -- --watch
 ```
 
-Commit your changes and then run the `agents-starter` as per the rest of this README.
+**Test Types Supported:**
+- **Unit Tests** - Test individual functions and components
+- **Integration Tests** - Test service interactions (D1, R2, Vectorize)
+- **E2E Tests** - Test full workflows with `@cloudflare/vitest-pool-workers`
 
-### Modifying the UI
+**When to Add Tests:**
+- ✅ **Now**: Add tests for critical business logic (text extraction, chunking, embeddings)
+- ✅ **Before Production**: Add integration tests for RAG tools
+- ✅ **For Reliability**: Add E2E tests for document processing workflow
 
-The chat interface is built with React and can be customized in `app.tsx`:
+**Example Test Structure:**
+```typescript
+// test/services/textChunker.test.ts
+import { describe, it, expect } from 'vitest';
+import { chunkText } from '../src/services/textChunker';
 
-- Modify the theme colors in `styles.css`
-- Add new UI components in the chat container
-- Customize message rendering and tool confirmation dialogs
-- Add new controls to the header
+describe('Text Chunker', () => {
+  it('should split text into chunks with overlap', () => {
+    const text = 'A'.repeat(2000);
+    const chunks = chunkText(text, 1000, 200);
+    expect(chunks.length).toBe(2);
+    expect(chunks[0].length).toBe(1000);
+  });
+});
+```
 
-### Example Use Cases
+## Key Technologies
 
-1. **Customer Support Agent**
-   - Add tools for:
-     - Ticket creation/lookup
-     - Order status checking
-     - Product recommendations
-     - FAQ database search
+- **[Cloudflare Agents](https://developers.cloudflare.com/agents/)** - Stateful AI agents with WebSocket support
+- **[Workers AI](https://developers.cloudflare.com/workers-ai/)** - Llama 4 Scout for function calling
+- **[Vectorize](https://developers.cloudflare.com/vectorize/)** - Vector database for semantic search
+- **[D1](https://developers.cloudflare.com/d1/)** - SQL database for metadata
+- **[R2](https://developers.cloudflare.com/r2/)** - Object storage for documents
+- **[Durable Workflows](https://developers.cloudflare.com/workflows/)** - Reliable multi-step processing
 
-2. **Development Assistant**
-   - Integrate tools for:
-     - Code linting
-     - Git operations
-     - Documentation search
-     - Dependency checking
+## Performance
 
-3. **Data Analysis Assistant**
-   - Build tools for:
-     - Database querying
-     - Data visualization
-     - Statistical analysis
-     - Report generation
-
-4. **Personal Productivity Assistant**
-   - Implement tools for:
-     - Task scheduling with flexible timing options
-     - One-time, delayed, and recurring task management
-     - Task tracking with reminders
-     - Email drafting
-     - Note taking
-
-5. **Scheduling Assistant**
-   - Build tools for:
-     - One-time event scheduling using specific dates
-     - Delayed task execution (e.g., "remind me in 30 minutes")
-     - Recurring tasks using cron patterns
-     - Task payload management
-     - Flexible scheduling patterns
-
-Each use case can be implemented by:
-
-1. Adding relevant tools in `tools.ts`
-2. Customizing the UI for specific interactions
-3. Extending the agent's capabilities in `server.ts`
-4. Adding any necessary external API integrations
+- **Upload**: < 1s for 10MB files
+- **Processing**: ~30s for 50-page PDF
+- **Search**: < 500ms with citations
+- **Chat**: Real-time streaming responses
 
 ## Learn More
 
-- [`agents`](https://github.com/cloudflare/agents/blob/main/packages/agents/README.md)
 - [Cloudflare Agents Documentation](https://developers.cloudflare.com/agents/)
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
+- [Llama 4 Scout Model](https://developers.cloudflare.com/workers-ai/models/llama-4-scout-17b-16e-instruct/)
+- [Building RAG Applications](https://developers.cloudflare.com/agents/api-reference/rag/)
 
 ## License
 

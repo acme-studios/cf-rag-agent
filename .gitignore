@@ -146,3 +146,19 @@ dist
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# Project artifacts
+project-artifacts/
+
+# Cursor
+.cursor/
+
+# Github
+.github/
+
+# VSCode
+.vscode/
+
+# Wrangler
+wrangler.jsonc
+
