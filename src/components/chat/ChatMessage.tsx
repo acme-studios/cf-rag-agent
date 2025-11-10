@@ -72,10 +72,10 @@ export function ChatMessage({
         isUser ? 'flex justify-end' : ''
       )}>
         <div className={clsx(
-          'rounded-2xl px-4 py-3',
+          'rounded-2xl px-4 py-3 inline-block',
           isUser 
             ? 'bg-slate-600 text-white max-w-[80%]' 
-            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 max-w-[90%]'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 max-w-full'
         )}>
           {/* Markdown Content */}
           <div className={clsx(

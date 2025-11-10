@@ -2,14 +2,14 @@
  * Text Extraction Service
  * 
  * Extracts text content from various document formats:
- * - PDF files (using pdf-parse)
+ * - PDF files (using unpdf)
  * - DOCX files (using mammoth)
  * 
  * Returns extracted text along with metadata like page count
  */
 
-import * as pdfParse from 'pdf-parse';
-import mammoth from 'mammoth';
+import { extractText as extractPdfText } from 'unpdf';
+import * as mammoth from 'mammoth';
 
 /**
  * Result of text extraction
@@ -50,24 +50,19 @@ export async function extractText(
     if (fileType === 'application/pdf' || fileType.includes('pdf')) {
       console.log('[EXTRACT] Processing as PDF');
       
-      // Convert ArrayBuffer to Buffer (required by pdf-parse)
-      const nodeBuffer = Buffer.from(buffer);
-      
-      // Parse PDF
-      // pdf-parse is a CommonJS module, need to access default export
-      const data = await (pdfParse as any).default(nodeBuffer);
+      // Extract text using unpdf (works in Workers)
+      const { text, totalPages } = await extractPdfText(buffer, {
+        mergePages: true
+      });
       
       console.log('[EXTRACT] PDF parsed successfully');
-      console.log('[EXTRACT] Pages:', data.numpages);
-      console.log('[EXTRACT] Text length:', data.text.length, 'characters');
+      console.log('[EXTRACT] Pages:', totalPages);
+      console.log('[EXTRACT] Text length:', text.length, 'characters');
       
       return {
-        text: data.text,
-        pageCount: data.numpages,
-        metadata: {
-          title: data.info?.Title,
-          author: data.info?.Author
-        }
+        text,
+        pageCount: totalPages,
+        metadata: {}
       };
     }
     
@@ -83,7 +78,9 @@ export async function extractText(
       const nodeBuffer = Buffer.from(buffer);
       
       // Extract raw text from DOCX
-      const result = await mammoth.extractRawText({ buffer: nodeBuffer });
+      // mammoth is a CommonJS module, need to access default export
+      const mammothLib = (mammoth as any).default || mammoth;
+      const result = await mammothLib.extractRawText({ buffer: nodeBuffer });
       
       console.log('[EXTRACT] DOCX parsed successfully');
       console.log('[EXTRACT] Text length:', result.value.length, 'characters');
@@ -91,7 +88,7 @@ export async function extractText(
       // Check for conversion warnings
       if (result.messages.length > 0) {
         console.log('[EXTRACT] Conversion warnings:', result.messages.length);
-        result.messages.forEach(msg => {
+        result.messages.forEach((msg: any) => {
           console.log('[EXTRACT] Warning:', msg.message);
         });
       }
