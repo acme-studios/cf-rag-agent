@@ -27,26 +27,29 @@ Returns relevant text chunks with citations (document name and page number).`,
   }),
   
   execute: async ({ query, topK }) => {
+    console.log('[TOOL] ========================================');
     console.log('[TOOL] search_documents called');
     console.log('[TOOL] Query:', query);
+    console.log('[TOOL] topK:', topK);
     
     try {
       // Get agent context to access env and state
       const { agent } = getCurrentAgent<Chat>();
       if (!agent) {
-        return 'Agent not available';
+        console.error('[TOOL] Agent not available');
+        return 'Error: Agent not available. Please try again.';
       }
+      
       const env = agent.getEnv();
       const sessionId = agent.state.sessionId;
       
-      if (!sessionId) {
-        return {
-          success: false,
-          error: 'No active session'
-        };
-      }
-      
+      console.log('[TOOL] Agent retrieved successfully');
       console.log('[TOOL] Session ID:', sessionId);
+      
+      if (!sessionId) {
+        console.error('[TOOL] No active session');
+        return 'Error: No active session. Please refresh the page.';
+      }
       
       // Step 1: Generate embedding for the query
       console.log('[TOOL] Generating query embedding...');
@@ -58,16 +61,25 @@ Returns relevant text chunks with citations (document name and page number).`,
         throw new Error('Failed to generate query embedding');
       }
       
-      console.log('[TOOL] Query embedding generated');
+      console.log('[TOOL] Query embedding generated successfully');
+      console.log('[TOOL] Embedding dimensions:', queryEmbedding.data[0].length);
       
       // Step 2: Search Vectorize for similar chunks
       console.log('[TOOL] Searching Vectorize...');
+      console.log('[TOOL] Filter:', { sessionId });
+      
       const searchResults = await env.VECTOR_INDEX.query(queryEmbedding.data[0], {
         topK,
         filter: { sessionId } // Only search user's documents
       });
       
+      console.log('[TOOL] Vectorize search complete');
       console.log('[TOOL] Found', searchResults.matches.length, 'matches');
+      
+      if (searchResults.matches.length > 0) {
+        console.log('[TOOL] First match ID:', searchResults.matches[0].id);
+        console.log('[TOOL] First match score:', searchResults.matches[0].score);
+      }
       
       if (searchResults.matches.length === 0) {
         return {
@@ -80,6 +92,7 @@ Returns relevant text chunks with citations (document name and page number).`,
       // Step 3: Retrieve full chunk data from D1
       const chunkIds = searchResults.matches.map(m => m.id);
       console.log('[TOOL] Retrieving chunks from D1...');
+      console.log('[TOOL] Chunk IDs to retrieve:', chunkIds);
       
       const chunks = await env.DB.prepare(`
         SELECT 
@@ -96,11 +109,21 @@ Returns relevant text chunks with citations (document name and page number).`,
         ORDER BY dc.id
       `).bind(...chunkIds, sessionId).all();
       
-      console.log('[TOOL] Retrieved', chunks.results.length, 'chunks');
+      console.log('[TOOL] D1 query complete');
+      console.log('[TOOL] Retrieved', chunks.results.length, 'chunks from D1');
+      
+      if (chunks.results.length === 0) {
+        console.warn('[TOOL] No chunks found in D1 for the given IDs');
+      }
       
       // Step 4: Format results with citations
-      const results = searchResults.matches.map((match, index) => {
-        const chunk = chunks.results.find((c: any) => c.id.toString() === match.id);
+      const results = searchResults.matches.map((match) => {
+        // match.id is a string from Vectorize, c.id is a number from D1
+        const chunk = chunks.results.find((c: any) => c.id.toString() === match.id.toString());
+        
+        if (!chunk) {
+          console.warn('[TOOL] No chunk found for match ID:', match.id);
+        }
         
         return {
           text: chunk?.text || '',
@@ -113,17 +136,26 @@ Returns relevant text chunks with citations (document name and page number).`,
         };
       });
       
-      console.log('[TOOL] Search complete');
+      console.log('[TOOL] Formatting results...');
       
       // Format response for the LLM
-      const formattedResults = results.map(r => 
-        `[${r.citation.filename}${r.citation.page ? `, p.${r.citation.page}` : ''}]: ${r.text}`
-      ).join('\n\n');
+      const formattedResults = results.map((r, idx) => {
+        const preview = typeof r.text === 'string' ? r.text.substring(0, 100) : '';
+        console.log(`[TOOL] Result ${idx + 1}: ${preview}...`);
+        return `[${r.citation.filename}${r.citation.page ? `, p.${r.citation.page}` : ''}]: ${r.text}`;
+      }).join('\n\n');
+      
+      console.log('[TOOL] Search complete successfully');
+      console.log('[TOOL] Returning', results.length, 'results to LLM');
+      console.log('[TOOL] ========================================');
       
       return `Found ${results.length} relevant passages:\n\n${formattedResults}`;
       
     } catch (error) {
-      console.error('[TOOL] Error in search_documents:', error);
+      console.error('[TOOL] ========================================');
+      console.error('[TOOL] ERROR in search_documents:', error);
+      console.error('[TOOL] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('[TOOL] ========================================');
       return `Error searching documents: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }

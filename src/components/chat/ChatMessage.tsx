@@ -80,10 +80,21 @@ export function ChatMessage({
           {/* Markdown Content */}
           <div className={clsx(
             'prose prose-sm max-w-none',
-            'prose-p:leading-relaxed prose-p:m-0',
+            // Paragraph spacing
+            'prose-p:leading-relaxed prose-p:my-3 prose-p:first:mt-0 prose-p:last:mb-0',
+            // List styling
+            'prose-ul:my-3 prose-ul:list-disc prose-ul:pl-5 prose-ul:space-y-2',
+            'prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-5 prose-ol:space-y-2',
+            'prose-li:my-1',
+            // Heading spacing
+            'prose-h1:mt-6 prose-h1:mb-4 prose-h2:mt-5 prose-h2:mb-3 prose-h3:mt-4 prose-h3:mb-2',
+            // Strong/bold styling
+            'prose-strong:font-semibold prose-strong:text-slate-900 dark:prose-strong:text-slate-100',
+            // Color theme
             isUser 
-              ? 'prose-invert prose-p:text-white' 
+              ? 'prose-invert prose-p:text-white prose-li:text-white' 
               : 'dark:prose-invert',
+            // Code styling
             'prose-pre:bg-slate-900 prose-pre:text-slate-100',
             'prose-code:text-slate-700 dark:prose-code:text-slate-300',
             'prose-code:bg-slate-100 dark:prose-code:bg-slate-800',

@@ -10,10 +10,8 @@
  * This uses our beautiful atomic UI components and connects to the backend.
  */
 
-import { useEffect, useState } from 'react';
-import { useAgent } from 'agents/react';
-import { useAgentChat } from 'agents/ai-react';
-import type { UIMessage } from '@ai-sdk/react';
+import { useEffect, useState, useRef } from 'react';
+import { RAGAgentClient, type AgentState } from './agent/wsClient';
 
 // Layout components
 import { Navbar } from './components/layout/Navbar';
@@ -95,46 +93,75 @@ export default function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
   
-  // Initialize agent
-  const agent = useAgent({
-    agent: 'chat'
-  });
+  // WebSocket client
+  const clientRef = useRef<RAGAgentClient | null>(null);
+  const hydratedRef = useRef(false);
+  const [isPending, setIsPending] = useState(false);
   
-  // Agent chat hook
-  const {
-    messages: agentMessages,
-    sendMessage,
-    status
-  } = useAgentChat<unknown, UIMessage>({
-    agent
-  });
-  
-  // Convert agent messages to our format
+  // Initialize WebSocket connection
   useEffect(() => {
-    const converted: Message[] = agentMessages.map((msg) => {
-      // Extract text content
-      let content = '';
-      const citations: Citation[] = [];
-      
-      if (msg.parts) {
-        for (const part of msg.parts) {
-          if (part.type === 'text') {
-            content += part.text;
-          }
-          // TODO: Extract citations from tool results in Phase 4
+    if (!sessionId || clientRef.current) return;
+    
+    const client = new RAGAgentClient();
+    clientRef.current = client;
+    
+    // Handle ready event - restore messages from backend
+    client.onReady = (state: AgentState) => {
+      console.log('[APP] Agent ready, state:', state);
+      if (!hydratedRef.current && state.messages) {
+        const restored: Message[] = state.messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({
+            id: crypto.randomUUID(),
+            role: m.role as 'user' | 'assistant',
+            content: m.content
+          }));
+        if (restored.length) {
+          setMessages(restored);
         }
+        hydratedRef.current = true;
       }
-      
-      return {
-        id: msg.id,
-        role: msg.role as 'user' | 'assistant',
-        content,
-        citations: citations.length > 0 ? citations : undefined
-      };
+    };
+    
+    // Handle streaming deltas
+    client.onDelta = (text: string) => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (!last || last.role !== 'assistant') {
+          // First delta - set pending and create new assistant message
+          setIsPending(true);
+          return [...prev, { id: crypto.randomUUID(), role: 'assistant', content: text }];
+        }
+        // Subsequent deltas - append to existing message
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...last, content: last.content + text };
+        return updated;
+      });
+    };
+    
+    // Handle done
+    client.onDone = () => {
+      console.log('[APP] Stream done, clearing pending state');
+      setIsPending(false);
+    };
+    
+    // Handle cleared
+    client.onCleared = () => {
+      console.log('[APP] Chat cleared');
+      hydratedRef.current = false;
+      setMessages([]);
+    };
+    
+    // Connect
+    client.connect(sessionId).catch(err => {
+      console.error('[APP] Failed to connect:', err);
+      setChatError('Failed to connect to agent');
     });
     
-    setMessages(converted);
-  }, [agentMessages]);
+    return () => {
+      client.disconnect();
+    };
+  }, [sessionId]);
   
   // Toggle theme
   const toggleTheme = () => {
@@ -269,14 +296,28 @@ export default function App() {
     console.log('[APP] Sending message:', message);
     setChatError(null);
     
+    if (!clientRef.current?.isOpen()) {
+      setChatError('Not connected to agent');
+      return;
+    }
+    
+    // Add user message immediately
+    setMessages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: message
+    }]);
+    
+    // Set pending state - will be cleared when stream completes
+    setIsPending(true);
+    
+    // Send to backend
     try {
-      await sendMessage({
-        role: 'user',
-        parts: [{ type: 'text', text: message }]
-      });
+      clientRef.current.chat(message);
     } catch (error) {
-      console.error('[APP] Send message error:', error);
-      setChatError(error instanceof Error ? error.message : 'Failed to send message');
+      console.error('[APP] Failed to send message:', error);
+      setChatError('Failed to send message');
+      setIsPending(false);
     }
   };
   
@@ -309,8 +350,8 @@ export default function App() {
             <ChatContainer
               messages={messages}
               onSendMessage={handleSendMessage}
-              isLoading={status === 'submitted'}
-              isStreaming={status === 'streaming'}
+              isLoading={isPending}
+              isStreaming={isPending}
               error={chatError}
               onClearError={handleClearError}
             />

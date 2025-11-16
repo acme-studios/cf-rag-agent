@@ -9,7 +9,7 @@
  * - Automatic cleanup of expired sessions
  */
 
-import { AIChatAgent } from 'agents/ai-chat-agent';
+import { Agent } from 'agents';
 import type { Connection, ConnectionContext } from 'agents';
 
 /**
@@ -38,6 +38,15 @@ interface ConversationMessage {
 }
 
 /**
+ * Message row stored in DB and state (cf-chat-agent pattern)
+ */
+export interface Msg {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  ts: number;
+}
+
+/**
  * Agent state structure
  * This is automatically persisted by the Agents SDK
  */
@@ -45,14 +54,15 @@ interface RAGAgentState {
   sessionId: string;
   documents: DocumentMetadata[];
   conversationHistory: ConversationMessage[];
+  messages: Msg[]; // cf-chat-agent pattern: all messages with timestamps
   lastActivity: number;
 }
 
 /**
  * RAG Agent Class
- * Extends AIChatAgent to add RAG-specific functionality
+ * Extends Agent (base class) to match cf-chat-agent pattern
  */
-export class RAGAgent extends AIChatAgent<Env, RAGAgentState> {
+export class RAGAgent extends Agent<Env, RAGAgentState> {
   /**
    * Initial state for new agent instances
    * This is the default state when an agent is first created
@@ -61,6 +71,7 @@ export class RAGAgent extends AIChatAgent<Env, RAGAgentState> {
     sessionId: '',
     documents: [],
     conversationHistory: [],
+    messages: [], // cf-chat-agent pattern
     lastActivity: Date.now()
   };
 
@@ -104,14 +115,23 @@ export class RAGAgent extends AIChatAgent<Env, RAGAgentState> {
       await this.sql`
         CREATE TABLE IF NOT EXISTS document_chunks (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL,
           document_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
           chunk_index INTEGER NOT NULL,
           text TEXT NOT NULL,
           page_number INTEGER,
-          created_at INTEGER NOT NULL,
-          FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+          embedding_id TEXT,
           FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        )
+      `;
+      
+      // Create messages table for chat history (cf-chat-agent pattern)
+      await this.sql`
+        CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          ts INTEGER NOT NULL
         )
       `;
       
@@ -148,9 +168,10 @@ export class RAGAgent extends AIChatAgent<Env, RAGAgentState> {
     // Initialize database schema on first connection
     await this.initializeDatabase();
     
-    // Extract session ID from request headers
-    // The frontend will send this in the x-session-id header
-    const sessionId = ctx.request.headers.get('x-session-id') || 'default';
+    // Extract session ID from URL path: /agents/chat/{sessionId}
+    const url = new URL(ctx.request.url);
+    const pathParts = url.pathname.split('/');
+    const sessionId = pathParts[pathParts.length - 1] || 'default';
     console.log('[AGENT] Session ID:', sessionId);
     
     // Check if this is a new session or existing session
@@ -173,6 +194,7 @@ export class RAGAgent extends AIChatAgent<Env, RAGAgentState> {
         sessionId,
         documents: [],
         conversationHistory: [],
+        messages: [], // cf-chat-agent pattern
         lastActivity: Date.now()
       });
       

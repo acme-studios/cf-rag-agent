@@ -98,9 +98,11 @@ export async function storeDocumentChunks(
       console.log(`[STORAGE] Chunk ${i + 1} stored in D1 with ID:`, chunkId);
       
       // Prepare vector for Vectorize
-      // Metadata includes document info for filtering
+      // Use namespace for session isolation (applied before vector search)
+      // Metadata includes document info for additional context
       vectorizeVectors.push({
         id: chunkId.toString(),
+        namespace: sessionId,
         values: embedding,
         metadata: {
           documentId,
@@ -119,7 +121,8 @@ export async function storeDocumentChunks(
     const vectorizeResult = await vectorIndex.upsert(vectorizeVectors);
     
     console.log('[STORAGE] Vectorize insert complete');
-    console.log('[STORAGE] Vectors inserted:', vectorizeResult.count);
+    console.log('[STORAGE] Vectors inserted:', vectorizeResult.count ?? vectorizeVectors.length);
+    console.log('[STORAGE] Vectorize result:', JSON.stringify(vectorizeResult));
     
     // Update document status to 'ready'
     await db.prepare(`
